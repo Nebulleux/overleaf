@@ -1,0 +1,69 @@
+services:
+
+    sharelatex:
+        restart: always
+        image: sharelatex/sharelatex
+        container_name: sharelatex
+        depends_on:
+            mongo:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        ports:
+            - 8888:80
+        expose:
+            - 80
+        links:
+            - mongo
+            - redis
+        stop_grace_period: 60s
+        volumes:
+            - ${DOCKER_VOLUME_STORAGE:-/mnt/docker-volumes}/sharelatex/data:/var/lib/overleaf
+        environment:
+            OVERLEAF_APP_NAME: Overleaf Community Edition
+            OVERLEAF_MONGO_URL: mongodb://mongo/sharelatex
+            OVERLEAF_REDIS_HOST: redis
+            REDIS_HOST: redis
+            ENABLED_LINKED_FILE_TYPES: 'project_file,project_output_file'
+            ENABLE_CONVERSIONS: 'true'
+            EMAIL_CONFIRMATION_DISABLED: 'true'
+            TEXMFVAR: /var/lib/sharelatex/tmp/texmf-var
+
+    mongo:
+        restart: always
+        image: mongo:5.0  # Mise à jour de la version de MongoDB à 5.0
+        container_name: mongo
+        command: "--replSet overleaf"
+        expose:
+            - 27017
+        volumes:
+            - "./mongo_data:/data/db"
+        healthcheck:
+            test: echo 'db.stats().ok' | mongo localhost:27017/test --quiet
+            interval: 10s
+            timeout: 10s
+            retries: 5
+
+    mongoinit:
+        image: mongo:5.0  # Mise à jour de l'image MongoDB ici aussi
+        restart: "no"
+        depends_on:
+            mongo:
+                condition: service_healthy
+        entrypoint:
+            [
+                "mongo",
+                "--host",
+                "mongo:27017",
+                "--eval",
+                'rs.initiate({ _id: "overleaf", members: [ { _id: 0, host: "mongo:27017" } ] })',
+            ]
+
+    redis:
+        restart: always
+        image: redis:7-alpine
+        container_name: sharelatex-redis
+        expose:
+            - 6379
+        volumes:
+            - ${DOCKER_VOLUME_STORAGE:-/mnt/docker-volumes}/sharelatex/redis:/data
